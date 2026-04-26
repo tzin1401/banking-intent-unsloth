@@ -1,0 +1,15 @@
+# Core - Unsloth
+unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git
+xformers
+trl
+peft
+accelerate
+bitsandbytes
+
+# Data & Evaluation
+datasets
+pandas
+scikit-learn
+
+# Config
+pyyaml
