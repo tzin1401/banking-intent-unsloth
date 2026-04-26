@@ -65,7 +65,21 @@ def main():
 
     # --- Load --------------------------------------------------
     print("\n📥 Loading BANKING77 from HuggingFace ...")
-    dataset = load_dataset("PolyAI/banking77")
+    try:
+        dataset = load_dataset("PolyAI/banking77")
+    except RuntimeError as e:
+        # Newer datasets versions on Kaggle can reject legacy dataset scripts.
+        # Fallback to official parquet export branch.
+        if "Dataset scripts are no longer supported" not in str(e):
+            raise
+        print("   Legacy dataset script is blocked. Falling back to parquet export...")
+        dataset = load_dataset(
+            "parquet",
+            data_files={
+                "train": "hf://datasets/PolyAI/banking77@refs/convert/parquet/default/train/*.parquet",
+                "test": "hf://datasets/PolyAI/banking77@refs/convert/parquet/default/test/*.parquet",
+            },
+        )
     # Use official labels from dataset metadata to avoid manual label mismatch.
     label_names = dataset["train"].features["label"].names
     train_full = build_dataframe(dataset["train"], label_names)
