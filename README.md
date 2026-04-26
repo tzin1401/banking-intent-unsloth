@@ -40,6 +40,56 @@ pip install -r requirements.txt
 
 ---
 
+## ☁️ Kaggle-First Workflow (Recommended)
+
+This repo is prepared for the flow:
+
+1. Clone your GitHub repo in Kaggle
+2. Train/fine-tune directly in Kaggle GPU
+3. Package outputs into `artifacts/` inside the repo
+4. (Optional) Push artifacts back to GitHub from Kaggle
+
+### A. Clone repo in Kaggle notebook
+
+```bash
+!git clone https://github.com/<your-username>/<your-repo>.git
+%cd <your-repo>
+```
+
+### B. Train + package in one command
+
+```bash
+!bash scripts/kaggle_train_and_package.sh
+```
+
+After this step, you will have:
+- `artifacts/run_.../outputs`
+- `artifacts/run_.../sample_data`
+- `artifacts/run_.../configs`
+- `artifacts/run_.../eval_results.txt` (if available)
+- `artifacts/LATEST.txt`
+
+### C. Push artifact back to your GitHub repo (optional)
+
+Set env vars in Kaggle cell:
+
+```bash
+%env GITHUB_TOKEN=<your_github_pat>
+%env GIT_USER_NAME=<your_name>
+%env GIT_USER_EMAIL=<your_email>
+%env TARGET_BRANCH=main
+```
+
+Then push:
+
+```bash
+!bash scripts/kaggle_push_artifacts.sh
+```
+
+> Note: Large checkpoints can exceed normal GitHub limits. For long-term usage, consider Git LFS or keep heavy outputs as Kaggle output artifacts and only commit metadata.
+
+---
+
 ## 📊 Dataset
 
 | | Source | Samples | Classes |
@@ -112,7 +162,7 @@ python scripts/inference.py configs/inference.yaml
 
 ## 📈 Results
 
-- **Test Accuracy:** _XX.XX%_ *(update after training)*
+- **Test Accuracy:** `79.94%` (Kaggle run)
 
 ---
 

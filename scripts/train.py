@@ -18,8 +18,15 @@ import pandas as pd
 from datasets import Dataset
 from unsloth import FastLanguageModel
 from trl import SFTTrainer
-from transformers import TrainingArguments
 from sklearn.metrics import accuracy_score, classification_report
+
+# Auto-detect trl version: SFTConfig (>= 0.8) vs TrainingArguments (< 0.8)
+try:
+    from trl import SFTConfig
+    USE_SFT_CONFIG = True
+except ImportError:
+    from transformers import TrainingArguments
+    USE_SFT_CONFIG = False
 
 # ============================================================
 # 1. Load config
@@ -106,32 +113,49 @@ print(f"\n📝 Sample prompt (first 300 chars):\n{train_dataset[0]['text'][:300]
 # ============================================================
 # 5. Trainer
 # ============================================================
-trainer = SFTTrainer(
-    model=model,
-    tokenizer=tokenizer,
-    train_dataset=train_dataset,
-    dataset_text_field="text",
-    max_seq_length=config["max_seq_length"],
-    dataset_num_proc=2,
-    packing=False,
-    args=TrainingArguments(
-        per_device_train_batch_size=config["per_device_train_batch_size"],
-        gradient_accumulation_steps=config["gradient_accumulation_steps"],
-        num_train_epochs=config["num_train_epochs"],
-        learning_rate=config["learning_rate"],
-        optim=config["optimizer"],
-        weight_decay=config["weight_decay"],
-        lr_scheduler_type=config["lr_scheduler_type"],
-        warmup_steps=config["warmup_steps"],
-        max_grad_norm=config["max_grad_norm"],
-        logging_steps=config["logging_steps"],
-        output_dir=config["output_dir"],
-        save_strategy=config["save_strategy"],
-        seed=config["seed"],
-        fp16=True,
-        report_to="none",
-    ),
+training_kwargs = dict(
+    per_device_train_batch_size=config["per_device_train_batch_size"],
+    gradient_accumulation_steps=config["gradient_accumulation_steps"],
+    num_train_epochs=config["num_train_epochs"],
+    learning_rate=config["learning_rate"],
+    optim=config["optimizer"],
+    weight_decay=config["weight_decay"],
+    lr_scheduler_type=config["lr_scheduler_type"],
+    warmup_steps=config["warmup_steps"],
+    max_grad_norm=config["max_grad_norm"],
+    logging_steps=config["logging_steps"],
+    output_dir=config["output_dir"],
+    save_strategy=config["save_strategy"],
+    seed=config["seed"],
+    fp16=config.get("fp16", True),
+    bf16=config.get("bf16", False),
+    report_to="none",
 )
+
+if USE_SFT_CONFIG:
+    training_kwargs["dataset_text_field"] = "text"
+    training_kwargs["max_seq_length"] = config["max_seq_length"]
+    training_kwargs["packing"] = False
+    training_kwargs["dataset_num_proc"] = config.get("dataset_num_proc", 2)
+    args = SFTConfig(**training_kwargs)
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        train_dataset=train_dataset,
+        args=args,
+    )
+else:
+    args = TrainingArguments(**training_kwargs)
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        train_dataset=train_dataset,
+        dataset_text_field="text",
+        max_seq_length=config["max_seq_length"],
+        dataset_num_proc=config.get("dataset_num_proc", 2),
+        packing=False,
+        args=args,
+    )
 
 # ============================================================
 # 6. Train!
@@ -164,9 +188,9 @@ for idx, row in test_df.iterrows():
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     outputs = model.generate(
         **inputs,
-        max_new_tokens=32,
-        temperature=0.0,
-        do_sample=False,
+        max_new_tokens=config.get("eval_max_new_tokens", 32),
+        temperature=config.get("eval_temperature", 0.0),
+        do_sample=config.get("eval_do_sample", False),
     )
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
     predicted = response.split("### Response:")[-1].strip().split("\n")[0].strip()

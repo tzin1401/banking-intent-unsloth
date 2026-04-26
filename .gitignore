@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local runtime outputs (keep repo clean by default)
+outputs/
+sample_data/
+
+# Kaggle / notebook artifacts
+*.ipynb_checkpoints

@@ -87,7 +87,6 @@ class IntentClassification:
         outputs = self.model.generate(
             **inputs,
             max_new_tokens=self.config.get("max_new_tokens", 32),
-            temperature=self.config.get("temperature", 0.0),
             do_sample=False,
         )
 
