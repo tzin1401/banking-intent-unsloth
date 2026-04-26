@@ -12,11 +12,21 @@ import os
 import pandas as pd
 from datasets import load_dataset
 
-INSTRUCTION = (
+INSTRUCTION_TEMPLATE = (
     "You are a banking intent classifier. "
-    "Given a customer's message, classify it into one of the banking intent categories. "
+    "Given a customer's message, classify it into EXACTLY ONE of these intents: "
+    "{label_list}. "
     "Only output the intent label, nothing else."
 )
+
+# Will be set after loading dataset labels
+INSTRUCTION = None
+
+
+def build_instruction(label_names: list) -> str:
+    """Build the instruction string with the full list of valid labels."""
+    label_list = ", ".join(label_names)
+    return INSTRUCTION_TEMPLATE.format(label_list=label_list)
 
 
 # ============================================================
@@ -46,10 +56,10 @@ def sample_balanced(df: pd.DataFrame, n_per_class: int, seed: int = 42) -> pd.Da
     )
 
 
-def add_sft_columns(df: pd.DataFrame) -> pd.DataFrame:
+def add_sft_columns(df: pd.DataFrame, instruction: str) -> pd.DataFrame:
     """Add instruction / input / output columns for Alpaca-style SFT."""
     df = df.copy()
-    df["instruction"] = INSTRUCTION
+    df["instruction"] = instruction
     df["input"] = df["text"]
     df["output"] = df["intent"]
     return df
@@ -74,6 +84,12 @@ def main():
     )
     # Use official labels from dataset metadata to avoid manual label mismatch.
     label_names = dataset["train"].features["label"].names
+    print(f"   Labels      : {len(label_names)} classes")
+
+    # Build instruction with full label list
+    global INSTRUCTION
+    INSTRUCTION = build_instruction(label_names)
+
     train_full = build_dataframe(dataset["train"], label_names)
     test_full  = build_dataframe(dataset["test"], label_names)
     print(f"   Full train : {len(train_full):>6,} rows  ({train_full['label'].nunique()} classes)")
@@ -91,8 +107,8 @@ def main():
     print(f"   Sample seed   : {SAMPLE_SEED}")
 
     # --- Format for SFT ----------------------------------------
-    train_sft = add_sft_columns(train_sampled)
-    test_sft  = add_sft_columns(test_sampled)
+    train_sft = add_sft_columns(train_sampled, INSTRUCTION)
+    test_sft  = add_sft_columns(test_sampled, INSTRUCTION)
 
     # --- Save --------------------------------------------------
     out_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sample_data")
@@ -100,19 +116,26 @@ def main():
 
     train_path = os.path.join(out_dir, "train.csv")
     test_path  = os.path.join(out_dir, "test.csv")
+    labels_path = os.path.join(out_dir, "labels.txt")
 
     train_sft.to_csv(train_path, index=False)
     test_sft.to_csv(test_path,  index=False)
 
+    # Save label list for use by train.py and inference.py
+    with open(labels_path, "w") as f:
+        for name in label_names:
+            f.write(name + "\n")
+
     print(f"\n💾 Saved  {train_path}  ({len(train_sft)} rows)")
     print(f"   Saved  {test_path}   ({len(test_sft)} rows)")
+    print(f"   Saved  {labels_path}  ({len(label_names)} labels)")
 
     # --- Preview -----------------------------------------------
     print("\n📝 Sample entry:")
     row = train_sft.iloc[0]
     print(f"   text       : {row['text']}")
     print(f"   intent     : {row['intent']}")
-    print(f"   instruction: {row['instruction'][:60]}...")
+    print(f"   instruction: {row['instruction'][:80]}...")
     print()
 
 

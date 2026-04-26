@@ -15,6 +15,7 @@ import os
 import sys
 import yaml
 import pandas as pd
+from difflib import get_close_matches
 from datasets import Dataset
 from unsloth import FastLanguageModel
 from trl import SFTTrainer
@@ -77,6 +78,33 @@ model = FastLanguageModel.get_peft_model(
 # ============================================================
 train_df = pd.read_csv(config["train_data_path"])
 test_df  = pd.read_csv(config["test_data_path"])
+
+# Load valid label list for prediction validation
+labels_path = os.path.join(os.path.dirname(config["train_data_path"]), "labels.txt")
+if os.path.exists(labels_path):
+    with open(labels_path, "r") as f:
+        VALID_LABELS = [line.strip() for line in f if line.strip()]
+    print(f"   Valid labels: {len(VALID_LABELS)} loaded from {labels_path}")
+else:
+    # Fallback: extract from training data
+    VALID_LABELS = sorted(train_df["output"].unique().tolist())
+    print(f"   Valid labels: {len(VALID_LABELS)} (extracted from training data)")
+
+
+def clean_prediction(raw_pred: str, valid_labels: list = VALID_LABELS) -> str:
+    """Map raw model prediction to the closest valid label."""
+    raw_pred = raw_pred.strip()
+    # Exact match (case-insensitive)
+    for label in valid_labels:
+        if raw_pred.lower() == label.lower():
+            return label
+    # Fuzzy match
+    lower_labels = [l.lower() for l in valid_labels]
+    matches = get_close_matches(raw_pred.lower(), lower_labels, n=1, cutoff=0.6)
+    if matches:
+        idx = lower_labels.index(matches[0])
+        return valid_labels[idx]
+    return raw_pred  # fallback — will count as wrong
 
 # Alpaca-style prompt template --------------------------------
 ALPACA_PROMPT = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
@@ -193,7 +221,8 @@ for idx, row in test_df.iterrows():
         do_sample=config.get("eval_do_sample", False),
     )
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    predicted = response.split("### Response:")[-1].strip().split("\n")[0].strip()
+    raw_predicted = response.split("### Response:")[-1].strip().split("\n")[0].strip()
+    predicted = clean_prediction(raw_predicted)
 
     y_true.append(row["output"])
     y_pred.append(predicted)

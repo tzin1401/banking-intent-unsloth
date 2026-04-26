@@ -1,10 +1,12 @@
 # ==========================================
-# Inference Configuration
+# Inference Configuration (Llama 3.2 3B)
 # ==========================================
 
 model_path: "./outputs"                              # Path to saved LoRA adapter
-base_model: "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
-max_seq_length: 512
+base_model: "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
+max_seq_length: 768              # Match training config (prompt has label list)
 load_in_4bit: true
-max_new_tokens: 32
-temperature: 0.0       # Deterministic for classification
+max_new_tokens: 12               # Intent labels are short
+temperature: 0.0                 # Deterministic for classification
+labels_path: "./sample_data/labels.txt"   # Valid label list for fuzzy matching
+

@@ -8,8 +8,10 @@ Required interface (per assignment spec):
         def __call__(self, message):     # return predicted_label
 """
 
+import os
 import sys
 import yaml
+from difflib import get_close_matches
 from unsloth import FastLanguageModel
 
 
@@ -34,7 +36,15 @@ class IntentClassification:
         "### Response:\n"
     )
 
-    _INSTRUCTION = (
+    _INSTRUCTION_TEMPLATE = (
+        "You are a banking intent classifier. "
+        "Given a customer's message, classify it into EXACTLY ONE of these intents: "
+        "{label_list}. "
+        "Only output the intent label, nothing else."
+    )
+
+    # Fallback if labels.txt is not found
+    _INSTRUCTION_FALLBACK = (
         "You are a banking intent classifier. "
         "Given a customer's message, classify it into one of the banking "
         "intent categories. Only output the intent label, nothing else."
@@ -55,6 +65,19 @@ class IntentClassification:
         with open(model_path, "r") as f:
             self.config = yaml.safe_load(f)
 
+        # ---- load valid labels ----
+        labels_path = self.config.get("labels_path", "./sample_data/labels.txt")
+        if os.path.exists(labels_path):
+            with open(labels_path, "r") as f:
+                self.valid_labels = [line.strip() for line in f if line.strip()]
+            label_list = ", ".join(self.valid_labels)
+            self._INSTRUCTION = self._INSTRUCTION_TEMPLATE.format(label_list=label_list)
+            print(f"   Loaded {len(self.valid_labels)} valid labels from {labels_path}")
+        else:
+            self.valid_labels = []
+            self._INSTRUCTION = self._INSTRUCTION_FALLBACK
+            print(f"   ⚠️  labels.txt not found at {labels_path}, using fallback instruction")
+
         # ---- model + tokenizer ----
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
             model_name=self.config["model_path"],
@@ -62,6 +85,24 @@ class IntentClassification:
             load_in_4bit=self.config["load_in_4bit"],
         )
         FastLanguageModel.for_inference(self.model)  # 2× faster
+
+    # ------------------------------------------------------------------
+    def _clean_prediction(self, raw_pred: str) -> str:
+        """Map raw model output to the closest valid label."""
+        raw_pred = raw_pred.strip()
+        if not self.valid_labels:
+            return raw_pred
+        # Exact match (case-insensitive)
+        for label in self.valid_labels:
+            if raw_pred.lower() == label.lower():
+                return label
+        # Fuzzy match
+        lower_labels = [l.lower() for l in self.valid_labels]
+        matches = get_close_matches(raw_pred.lower(), lower_labels, n=1, cutoff=0.6)
+        if matches:
+            idx = lower_labels.index(matches[0])
+            return self.valid_labels[idx]
+        return raw_pred
 
     # ------------------------------------------------------------------
     def __call__(self, message: str) -> str:
@@ -91,10 +132,10 @@ class IntentClassification:
         )
 
         decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        predicted_label = (
+        raw_label = (
             decoded.split("### Response:")[-1].strip().split("\n")[0].strip()
         )
-        return predicted_label
+        return self._clean_prediction(raw_label)
 
 
 # =====================================================================
