@@ -1,146 +1,173 @@
 # Banking Intent Classification with Unsloth
 
-Fine-tuning **Llama-3.2-1B-Instruct** (QLoRA 4-bit) on the **BANKING77** dataset for banking customer intent classification using **Unsloth**.
+Dự án fine-tune mô hình **Llama-3.2 (1B/3B)** bằng **Unsloth + QLoRA 4-bit** trên bộ dữ liệu **BANKING77** để phân loại ý định khách hàng ngân hàng.
+
+Phiên bản hiện tại tập trung vào:
+- prompt có **danh sách đầy đủ 77 labels**
+- hậu xử lý dự đoán bằng **exact match + fuzzy match**
+- pipeline **Kaggle train + package artifacts**
 
 ---
 
-## 📁 Project Structure
+## 📁 Cấu trúc dự án
 
-```
+```text
 banking-intent-unsloth/
 ├── scripts/
-│   ├── preprocess_data.py    # Data preprocessing & sampling
-│   ├── train.py              # Fine-tuning with Unsloth
-│   └── inference.py          # Standalone inference (IntentClassification class)
+│   ├── preprocess_data.py
+│   ├── train.py
+│   ├── inference.py
+│   ├── package_artifacts.py
+│   ├── kaggle_train_and_package.sh
+│   └── kaggle_push_artifacts.sh
 ├── configs/
-│   ├── train.yaml            # Training hyperparameters
-│   └── inference.yaml        # Inference settings
-├── sample_data/
-│   ├── train.csv             # Sampled & preprocessed training data
-│   └── test.csv              # Sampled & preprocessed test data
-├── train.sh                  # One-click training script
-├── inference.sh              # One-click inference script
-├── requirements.txt          # Python dependencies
+│   ├── train.yaml
+│   ├── train_1b_optimized.yaml
+│   ├── train_3b_t4x2.yaml
+│   ├── train_3b_t4x2_stable.yaml
+│   └── inference.yaml
+├── notebooks/
+│   └── kaggle_pipeline.ipynb
+├── train.sh
+├── inference.sh
+├── requirements.txt
 └── README.md
 ```
 
+Thư mục được tạo sau khi chạy:
+- `sample_data/`: `train.csv`, `test.csv`, `labels.txt`
+- `outputs/`: adapter/checkpoint + `eval_results.txt`
+- `artifacts/`: gói kết quả theo từng run
+
 ---
 
-## 🛠️ Setup
+## 🛠️ Cài đặt
 
-### Requirements
+### Yêu cầu
 - Python 3.10+
-- CUDA-compatible GPU (T4 16GB recommended for training)
-- ~4GB VRAM minimum for inference (RTX 3050+)
+- GPU CUDA (khuyến nghị T4 16GB hoặc cao hơn cho train)
 
-### Installation
+### Cài thư viện
 ```bash
 pip install -r requirements.txt
 ```
 
 ---
 
-## ☁️ Kaggle-First Workflow (Recommended)
+## 📊 Dữ liệu và tiền xử lý
 
-This repo is prepared for the flow:
+- Dataset: [PolyAI/banking77](https://huggingface.co/datasets/PolyAI/banking77)
+- Script: `scripts/preprocess_data.py`
 
-1. Clone your GitHub repo in Kaggle
-2. Train/fine-tune directly in Kaggle GPU
-3. Package outputs into `artifacts/` inside the repo
-4. (Optional) Push artifacts back to GitHub from Kaggle
+Script preprocess sẽ:
+1. tải BANKING77 từ parquet export trên Hugging Face
+2. normalize text (`strip().lower()`)
+3. lấy mẫu cân bằng theo lớp
+4. tạo dữ liệu Alpaca-style: `instruction`, `input`, `output`
+5. sinh `sample_data/labels.txt` (danh sách 77 intent hợp lệ)
 
-### A. Clone repo in Kaggle notebook
+Biến môi trường chính:
+- `TRAIN_PER_CLASS` (mặc định `50`)
+- `TEST_PER_CLASS` (mặc định `20`)
+- `SAMPLE_SEED` (mặc định `42`)
 
+Ví dụ:
 ```bash
-!git clone https://github.com/<your-username>/<your-repo>.git
-%cd <your-repo>
+export TRAIN_PER_CLASS=110
+export TEST_PER_CLASS=20
+python scripts/preprocess_data.py
 ```
-
-### B. Train + package in one command
-
-```bash
-!bash scripts/kaggle_train_and_package.sh
-```
-
-After this step, you will have:
-- `artifacts/run_.../outputs`
-- `artifacts/run_.../sample_data`
-- `artifacts/run_.../configs`
-- `artifacts/run_.../eval_results.txt` (if available)
-- `artifacts/LATEST.txt`
-
-### C. Push artifact back to your GitHub repo (optional)
-
-Set env vars in Kaggle cell:
-
-```bash
-%env GITHUB_TOKEN=<your_github_pat>
-%env GIT_USER_NAME=<your_name>
-%env GIT_USER_EMAIL=<your_email>
-%env TARGET_BRANCH=main
-```
-
-Then push:
-
-```bash
-!bash scripts/kaggle_push_artifacts.sh
-```
-
-> Note: Large checkpoints can exceed normal GitHub limits. For long-term usage, consider Git LFS or keep heavy outputs as Kaggle output artifacts and only commit metadata.
 
 ---
 
-## 📊 Dataset
+## 🧬 Fine-tuning
 
-| | Source | Samples | Classes |
-|---|---|---|---|
-| **Full** | [BANKING77](https://huggingface.co/datasets/PolyAI/banking77) | 13,083 | 77 intents |
-| **Sampled Train** | Balanced subset | ~3,850 | 77 (50/class) |
-| **Sampled Test** | Balanced subset | ~1,540 | 77 (20/class) |
+Script train chính: `scripts/train.py`  
+Mặc định đọc config từ `TRAIN_CONFIG`, fallback về `configs/train.yaml`.
 
-**Preprocessing steps:**
-1. Text normalization (lowercase, strip whitespace)
-2. Label mapping (integer → intent name)
-3. Balanced sampling per intent class
-4. Format to Alpaca-style prompts (instruction / input / output)
+### Các config có sẵn
+- `configs/train.yaml`: cấu hình mặc định 1B
+- `configs/train_1b_optimized.yaml`: cấu hình 1B tối ưu (mục tiêu accuracy cao)
+- `configs/train_3b_t4x2.yaml`: cấu hình 3B cho Kaggle T4x2
+- `configs/train_3b_t4x2_stable.yaml`: cấu hình 3B ổn định hơn khi gặp OOM/instability
 
----
+### Hyperparameters nổi bật (bản 3B hiện dùng nhiều)
+- base model: `unsloth/Llama-3.2-3B-Instruct-bnb-4bit`
+- `max_seq_length=768`
+- LoRA: `r=64`, `alpha=128`, `dropout=0.05`
+- `per_device_train_batch_size=2`
+- `gradient_accumulation_steps=16`
+- `num_train_epochs=8`
+- `learning_rate=8e-5`
+- scheduler `cosine`, `warmup_steps=100`
 
-## 🧬 Training
-
-### Hyperparameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **Base Model** | `Llama-3.2-1B-Instruct` | 1B parameter LLM |
-| **Quantization** | QLoRA 4-bit | Saves ~75% VRAM |
-| **LoRA rank (r)** | 16 | Low-rank adaptation matrices |
-| **LoRA alpha** | 16 | Scaling factor |
-| **Batch size** | 8 | Per-device |
-| **Gradient accumulation** | 4 | Effective batch = 32 |
-| **Epochs** | 3 | Training iterations |
-| **Learning rate** | 2e-4 | With linear scheduler |
-| **Optimizer** | AdamW 8-bit | Memory-efficient |
-| **Weight decay** | 0.01 | Regularization |
-| **Max sequence length** | 512 | Token limit per sample |
-| **Warmup steps** | 10 | LR warmup |
-
-### Run Training
-
+### Chạy local nhanh
 ```bash
-# Full pipeline (preprocess + train + evaluate)
 bash train.sh
+```
 
-# Or step by step:
+### Chạy theo config cụ thể
+```bash
+export TRAIN_CONFIG=configs/train_3b_t4x2.yaml
+export TRAIN_PER_CLASS=999
+export TEST_PER_CLASS=999
 python scripts/preprocess_data.py
 python scripts/train.py
 ```
 
-> **Note:** Training is recommended on **Google Colab** (free T4 GPU) or **Kaggle**. Upload this project folder and run `train.sh`.
+---
+
+## ☁️ Workflow Kaggle (khuyến nghị)
+
+### Cách 1: Notebook
+1. Upload `notebooks/kaggle_pipeline.ipynb` lên Kaggle
+2. Bật GPU + Internet
+3. Run All để preprocess -> train -> eval -> package
+
+### Cách 2: Script
+```bash
+bash scripts/kaggle_train_and_package.sh
+```
+
+Lưu ý: script Kaggle hiện tại gồm 3 bước:
+1. preprocess
+2. train
+3. package artifacts
+
+Sau khi chạy, kiểm tra:
+- `artifacts/LATEST.txt`
+- `artifacts/run_.../manifest.json`
+- `artifacts/run_.../eval_results.txt` (nếu có)
+
+Nếu muốn đẩy artifacts từ Kaggle về GitHub:
+```bash
+export GITHUB_TOKEN=<your_pat>
+export GIT_USER_NAME=<your_name>
+export GIT_USER_EMAIL=<your_email>
+export TARGET_BRANCH=main
+bash scripts/kaggle_push_artifacts.sh
+```
 
 ---
 
 ## 🖥️ Inference
+
+Script: `scripts/inference.py`
+
+Interface bắt buộc theo đề:
+```python
+class IntentClassification:
+    def __init__(self, model_path):
+        ...
+    def __call__(self, message):
+        ...
+        return predicted_label
+```
+
+Điểm chính của bản hiện tại:
+- Đọc `labels_path` từ `configs/inference.yaml` (mặc định `./sample_data/labels.txt`)
+- Prompt inference chèn danh sách nhãn hợp lệ
+- Hậu xử lý output bằng exact match + fuzzy match (`difflib.get_close_matches`)
 
 ### Python API
 ```python
@@ -148,29 +175,38 @@ from scripts.inference import IntentClassification
 
 classifier = IntentClassification("configs/inference.yaml")
 label = classifier("I am still waiting on my card?")
-print(label)  # → "card_arrival"
+print(label)
 ```
 
 ### CLI
 ```bash
 bash inference.sh
-# or
+# hoặc
 python scripts/inference.py configs/inference.yaml
 ```
 
 ---
 
-## 📈 Results
+## 📈 Kết quả
 
-- **Test Accuracy:** `79.94%` (Kaggle run)
+`scripts/train.py` sẽ:
+- evaluate trên `sample_data/test.csv`
+- in accuracy + classification report
+- lưu vào `outputs/eval_results.txt`
+
+Kết quả phụ thuộc:
+- config train đang dùng
+- kích thước subset (`TRAIN_PER_CLASS`, `TEST_PER_CLASS`)
+- tài nguyên GPU/runtime
 
 ---
 
-## 🎬 Video Demo
+## 🎬 Video demo (theo requirement)
 
 [🔗 Demo Video (Google Drive)](YOUR_GOOGLE_DRIVE_LINK_HERE)
 
-The video demonstrates:
-1. Running the inference script
-2. Example input messages & predicted intents
-3. Final accuracy on the test set
+Video nên thể hiện:
+1. cách chạy inference
+2. ít nhất một input mẫu
+3. nhãn dự đoán
+4. accuracy cuối trên test set

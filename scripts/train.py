@@ -189,7 +189,25 @@ else:
 # 6. Train!
 # ============================================================
 print("🚀 Starting training ...\n")
-stats = trainer.train()
+
+# Support resuming from checkpoint (for multi-session Kaggle training)
+resume_ckpt = config.get("resume_from_checkpoint", False)
+if resume_ckpt is True:
+    # Auto-detect latest checkpoint in output_dir
+    import glob
+    ckpt_dirs = sorted(glob.glob(os.path.join(config["output_dir"], "checkpoint-*")))
+    if ckpt_dirs:
+        resume_ckpt = ckpt_dirs[-1]
+        print(f"📂 Resuming from checkpoint: {resume_ckpt}")
+    else:
+        resume_ckpt = None
+        print("⚠️  No checkpoint found, starting from scratch")
+elif isinstance(resume_ckpt, str) and os.path.isdir(resume_ckpt):
+    print(f"📂 Resuming from checkpoint: {resume_ckpt}")
+else:
+    resume_ckpt = None
+
+stats = trainer.train(resume_from_checkpoint=resume_ckpt)
 
 print(f"\n✅ Training finished!")
 print(f"   Runtime     : {stats.metrics['train_runtime']:.1f}s")
