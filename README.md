@@ -1,11 +1,12 @@
 # Banking Intent Classification with Unsloth
 
-Dự án fine-tune mô hình **Llama-3.2 (1B/3B)** bằng **Unsloth + QLoRA 4-bit** trên bộ dữ liệu **BANKING77** để phân loại ý định khách hàng ngân hàng.
+Dự án fine-tune mô hình **Llama-3.2-3B-Instruct** bằng **Unsloth + QLoRA 4-bit** trên bộ dữ liệu **BANKING77** để phân loại ý định khách hàng ngân hàng.
 
-Phiên bản hiện tại tập trung vào:
-- prompt có **danh sách đầy đủ 77 labels**
-- hậu xử lý dự đoán bằng **exact match + fuzzy match**
-- pipeline **Kaggle train + package artifacts**
+Đặc điểm chính:
+- Prompt có **danh sách đầy đủ 77 labels** trong instruction
+- Hậu xử lý dự đoán bằng **exact match + fuzzy match**
+- Pipeline **Kaggle multi-session train** (hỗ trợ resume từ checkpoint)
+- Package artifacts tự động
 
 ---
 
@@ -27,7 +28,9 @@ banking-intent-unsloth/
 │   ├── train_3b_t4x2_stable.yaml
 │   └── inference.yaml
 ├── notebooks/
-│   └── kaggle_pipeline.ipynb
+│   ├── kaggle_pipeline.ipynb
+│   ├── kaggle_session2_resume.ipynb
+│   └── kaggle_video_demo.ipynb
 ├── train.sh
 ├── inference.sh
 ├── requirements.txt
@@ -91,13 +94,13 @@ Mặc định đọc config từ `TRAIN_CONFIG`, fallback về `configs/train.ya
 - `configs/train_3b_t4x2.yaml`: cấu hình 3B cho Kaggle T4x2
 - `configs/train_3b_t4x2_stable.yaml`: cấu hình 3B ổn định hơn khi gặp OOM/instability
 
-### Hyperparameters nổi bật (bản 3B hiện dùng nhiều)
+### Hyperparameters nổi bật (bản 3B hiện dùng)
 - base model: `unsloth/Llama-3.2-3B-Instruct-bnb-4bit`
 - `max_seq_length=768`
 - LoRA: `r=64`, `alpha=128`, `dropout=0.05`
 - `per_device_train_batch_size=2`
 - `gradient_accumulation_steps=16`
-- `num_train_epochs=8`
+- `num_train_epochs=6`
 - `learning_rate=8e-5`
 - scheduler `cosine`, `warmup_steps=100`
 
@@ -119,34 +122,26 @@ python scripts/train.py
 
 ## ☁️ Workflow Kaggle (khuyến nghị)
 
-### Cách 1: Notebook
+### Session 1: Train ban đầu
 1. Upload `notebooks/kaggle_pipeline.ipynb` lên Kaggle
-2. Bật GPU + Internet
-3. Run All để preprocess -> train -> eval -> package
+2. Bật **GPU T4x2** + **Internet**
+3. Run All → preprocess → train → eval → package → zip output
+4. Tạo **Dataset** từ notebook output (để dùng cho session 2 nếu cần)
 
-### Cách 2: Script
-```bash
-bash scripts/kaggle_train_and_package.sh
-```
+### Session 2: Resume training (nếu hết thời gian)
+1. Tạo notebook mới, add dataset output từ session 1
+2. Upload `notebooks/kaggle_session2_resume.ipynb`
+3. Run All → tự động tìm checkpoint → resume train → eval → zip
 
-Lưu ý: script Kaggle hiện tại gồm 3 bước:
-1. preprocess
-2. train
-3. package artifacts
+### Video Demo (trên account Kaggle khác)
+1. Tạo dataset public từ output đã train
+2. Tạo notebook mới trên account có GPU quota
+3. Upload `notebooks/kaggle_video_demo.ipynb`
+4. Add dataset → Run All → quay video
 
 Sau khi chạy, kiểm tra:
-- `artifacts/LATEST.txt`
-- `artifacts/run_.../manifest.json`
-- `artifacts/run_.../eval_results.txt` (nếu có)
-
-Nếu muốn đẩy artifacts từ Kaggle về GitHub:
-```bash
-export GITHUB_TOKEN=<your_pat>
-export GIT_USER_NAME=<your_name>
-export GIT_USER_EMAIL=<your_email>
-export TARGET_BRANCH=main
-bash scripts/kaggle_push_artifacts.sh
-```
+- `outputs/eval_results.txt` (accuracy + classification report)
+- `outputs/adapter_config.json` + `adapter_model.safetensors` (LoRA weights)
 
 ---
 
